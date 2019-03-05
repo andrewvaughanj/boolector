@@ -817,6 +817,40 @@ cdef class Boolector:
                 btorapi.boolector_failed(self._c_btor, n._c_node) == 1)
         return failed
 
+    def Failed_assumptions(self):
+        """ Failed_assumptions
+
+            Get all failed assumptions (see `Failed`).
+
+            :rtype: list(:class:`~pyboolector.BoolectorNode`)
+        """
+
+        #############################################################
+        #                                                           #
+        # FIXME: I am not entirely sure that this works!            #
+        #                                                           #
+        #    For the example, we expect to have three assumptions,  #
+        #    but we only get two!                                   #
+        #                                                           #
+        #############################################################
+
+        failed = []
+        failed_assumptions = btorapi.boolector_get_failed_assumptions(self._c_btor)
+        idx = 0
+        #
+        # failed_assumptions is a NULL-terminated list of pointers
+        #
+        while failed_assumptions[idx] != NULL:
+            #
+            # Create a new node for the return value
+            #
+            r = BoolectorNode(self)
+            (<BoolectorNode> r)._c_node = failed_assumptions[idx]
+            failed.append(r)
+            idx += 1
+
+        return failed
+
     def Fixate_assumptions(self):
         """ Fixate_assumptions()
 

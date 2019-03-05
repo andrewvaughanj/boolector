@@ -92,6 +92,9 @@ cdef extern from "boolector.h":
     bool boolector_failed (Btor * btor, BoolectorNode * node) \
       except +raise_py_error
 
+    BoolectorNode ** boolector_get_failed_assumptions (Btor * btor) \
+      except +raise_py_error
+
     void boolector_fixate_assumptions (Btor * btor) \
       except +raise_py_error
 
