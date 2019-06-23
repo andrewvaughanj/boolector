@@ -1,0 +1,181 @@
+diff --git a/makefile.in b/makefile.in
+index 9c7ad24..c11513b 100644
+--- a/makefile.in
++++ b/makefile.in
+@@ -15,8 +15,9 @@ CXXFLAGS=@CXXFLAGS@
+ ############################################################################
+ 
+ MAKEFLAGS=-j12
+-APP=cadical.cpp mobical.cpp
++APP=cadical.cpp # mobical.cpp
+ ALL=$(sort $(wildcard ../src/*.[ch]pp))
++ALL:= $(filter-out ../src/mobical.cpp,$(ALL))
+ SRC=$(filter %.cpp,$(subst ../src/,,$(ALL)))
+ LIB=$(filter-out $(APP),$(SRC))
+ OBJ=$(patsubst %.cpp,%.o,$(LIB))
+@@ -25,7 +26,7 @@ COMPILE=$(CXX) $(CXXFLAGS) -I$(DIR)
+ 
+ #--------------------------------------------------------------------------#
+ 
+-all: libcadical.a cadical mobical
++all: libcadical.a cadical # mobical
+ 
+ #--------------------------------------------------------------------------#
+ 
+@@ -42,8 +43,8 @@ all: libcadical.a cadical mobical
+ cadical: cadical.o libcadical.a makefile
+ 	$(COMPILE) -o $@ $< -L. -lcadical
+ 
+-mobical: mobical.o libcadical.a makefile
+-	$(COMPILE) -o $@ $< -L. -lcadical
++# mobical: mobical.o libcadical.a makefile
++#	$(COMPILE) -o $@ $< -L. -lcadical
+ 
+ libcadical.a: $(OBJ) makefile
+ 	ar rc $@ $(OBJ)
+diff --git a/src/resources.cpp b/src/resources.cpp
+index 06c8c87..ea3263c 100644
+--- a/src/resources.cpp
++++ b/src/resources.cpp
+@@ -7,7 +7,9 @@
+ 
+ extern "C" {
+ #include <sys/time.h>
++#ifdef NWINDOWS
+ #include <sys/resource.h>
++#endif
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <string.h>
+@@ -32,12 +34,16 @@ double Internal::real_time () {
+ // etc.  For different variants of Unix not all fields are meaningful.
+ 
+ double absolute_process_time () {
++#ifdef NWINDOWS
+   struct rusage u;
+   double res;
+   if (getrusage (RUSAGE_SELF, &u)) return 0;
+   res = u.ru_utime.tv_sec + 1e-6 * u.ru_utime.tv_usec;  // user time
+   res += u.ru_stime.tv_sec + 1e-6 * u.ru_stime.tv_usec; // + system time
+   return res;
++#else
++  return 0;
++#endif
+ }
+ 
+ double Internal::process_time () {
+@@ -49,9 +55,13 @@ double Internal::process_time () {
+ // This seems to work on Linux (man page says since Linux 2.6.32).
+ 
+ size_t maximum_resident_set_size () {
++#ifdef NWINDOWS
+   struct rusage u;
+   if (getrusage (RUSAGE_SELF, &u)) return 0;
+   return ((size_t) u.ru_maxrss) << 10;
++#else
++  return 0;
++#endif
+ }
+ 
+ // Unfortunately 'getrusage' on Linux does not support current resident set
+@@ -62,6 +72,7 @@ size_t maximum_resident_set_size () {
+ // '_SC_PAGESIZE' are available).
+ 
+ size_t current_resident_set_size () {
++#ifdef NWINDOWS
+   char path[40];
+   sprintf (path, "/proc/%ld/statm", (long) getpid ());
+   FILE * file = fopen (path, "r");
+@@ -70,6 +81,9 @@ size_t current_resident_set_size () {
+   int scanned = fscanf (file, "%ld %ld", &dummy, &rss);
+   fclose (file);
+   return scanned == 2 ? rss * sysconf (_SC_PAGESIZE) : 0;
++#else
++  return 0;
++#endif
+ }
+ 
+ }
+diff --git a/src/signal.cpp b/src/signal.cpp
+index 2b435a3..df255e0 100644
+--- a/src/signal.cpp
++++ b/src/signal.cpp
+@@ -25,15 +25,23 @@ static bool alarm_set = false;
+ static int alarm_time = -1;
+ static Handler * signal_handler;
+ 
++#ifdef NWINDOWS
+ void Handler::catch_alarm () { catch_signal (SIGALRM); }
++#else
++void Handler::catch_alarm () { }
++#endif
+ 
+ #define SIGNALS \
+ SIGNAL(SIGABRT) \
+-SIGNAL(SIGBUS) \
+ SIGNAL(SIGINT) \
+ SIGNAL(SIGSEGV) \
+ SIGNAL(SIGTERM) \
+ 
++#ifdef NWINDOWS
++SIGNAL(SIGBUS) \
++
++#endif
++
+ #define SIGNAL(SIG) \
+ static void (*SIG ## _handler)(int);
+ SIGNALS
+@@ -42,7 +50,9 @@ static void (*SIGALRM_handler)(int);
+ 
+ void Signal::reset_alarm () {
+   if (!alarm_set) return;
++#ifdef NWINDOWS
+   (void) signal (SIGALRM, SIGALRM_handler);
++#endif
+   SIGALRM_handler = 0;
+   caught_alarm = false;
+   alarm_set = false;
+@@ -65,7 +75,9 @@ const char * Signal::name (int sig) {
+   if (sig == SIG) return # SIG;
+   SIGNALS
+ #undef SIGNAL
++#ifdef NWINDOWS
+   if (sig == SIGALRM) return "SIGALRM";
++#endif
+   return "UNKNOWN";
+ }
+ 
+@@ -76,6 +88,7 @@ const char * Signal::name (int sig) {
+ // exclusive access to.  All these solutions are painful and not elegant.
+ 
+ static void catch_signal (int sig) {
++#ifdef NWINDOWS
+   if (sig == SIGALRM && absolute_real_time () >= alarm_time) {
+     if (!caught_alarm) {
+       caught_alarm = true;
+@@ -83,6 +96,9 @@ static void catch_signal (int sig) {
+     }
+     Signal::reset_alarm ();
+   } else {
++#else
++  {
++#endif
+     if (!caught_signal) {
+       caught_signal = true;
+       if (signal_handler) signal_handler->catch_signal (sig);
+@@ -101,6 +117,7 @@ SIGNALS
+ }
+ 
+ void Signal::alarm (int seconds) {
++#ifdef NWINDOWS
+   assert (seconds >= 0);
+   assert (!alarm_set);
+   assert (alarm_time < 0);
+@@ -108,6 +125,7 @@ void Signal::alarm (int seconds) {
+   alarm_set = true;
+   alarm_time = absolute_real_time () + seconds;
+   ::alarm (seconds);
++#endif
+ }
+ 
+ }
